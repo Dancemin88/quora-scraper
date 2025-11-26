@@ -1,5 +1,5 @@
 const express = require('express');
-const { chromium } = require('playwright-core');
+const { chromium } = require('playwright');
 
 const app = express();
 const PORT = process.env.PORT || 10000;
@@ -18,10 +18,10 @@ app.get('/search-quora', async (req, res) => {
       viewport: { width: 1280, height: 720 },
     });
 
-    // Pretend to be a normal desktop Chrome
+    // Look like a normal desktop Chrome
     await page.setUserAgent(
       'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 ' +
-      '(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        '(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
     );
 
     const url = `https://www.quora.com/search?q=${encodeURIComponent(
@@ -31,20 +31,20 @@ app.get('/search-quora', async (req, res) => {
     console.log('Navigating to:', url);
 
     await page.goto(url, {
-      // IMPORTANT: no "networkidle", Quora never really goes idle
+      // DO NOT use 'networkidle' on Quora
       waitUntil: 'domcontentloaded',
-      timeout: 60000,
+      timeout: 45000,
     });
 
-    // Let the SPA finish rendering
+    // Let React render
     await page.waitForTimeout(5000);
 
     const results = await page.evaluate(() => {
       const items = [];
 
-      // Question blocks
+      // Each question card
       const blocks = document.querySelectorAll(
-        '.puppeteer_test_question_component_base, .q-box'
+        '.puppeteer_test_question_component_base'
       );
 
       blocks.forEach((block) => {
@@ -54,7 +54,6 @@ app.get('/search-quora', async (req, res) => {
           block.querySelector('.puppeteer_test_question_title') ||
           block.querySelector('a[role="link"] .q-text') ||
           block.querySelector('.q-text');
-
         if (titleEl) {
           title = titleEl.innerText.trim();
         }
@@ -64,12 +63,11 @@ app.get('/search-quora', async (req, res) => {
         const linkEl =
           block.querySelector('a.puppeteer_test_link[href^="https://www.quora.com/"]') ||
           block.querySelector('a[href^="https://www.quora.com/"]');
-
         if (linkEl) {
           url = linkEl.href;
         }
 
-        // Snippet (small gray text under the title / around it)
+        // Snippet (gray text around the card)
         let snippet = '';
         const snippetEl = block.querySelector(
           '.q-text.qu-color--gray, .q-text.qu-color--gray_light'
@@ -83,7 +81,6 @@ app.get('/search-quora', async (req, res) => {
         }
       });
 
-      // Return up to 20 results
       return items.slice(0, 20);
     });
 
@@ -100,7 +97,7 @@ app.get('/search-quora', async (req, res) => {
   }
 });
 
-// simple health check
+// Health check route
 app.get('/', (req, res) => {
   res.send('Quora scraper is running');
 });
