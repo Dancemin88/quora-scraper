@@ -1,105 +1,123 @@
+// server.js
 const express = require('express');
-const { chromium } = require('playwright');
+const { chromium } = require('playwright'); // use full Playwright here
 
 const app = express();
 const PORT = process.env.PORT || 10000;
 
+app.get('/', (req, res) => {
+  res.send('Quora scraper is running');
+});
+
 app.get('/search-quora', async (req, res) => {
-  const keyword = (req.query.keyword || 'truck').toString();
+  const keyword = (req.query.keyword || '').trim();
+
+  if (!keyword) {
+    return res
+      .status(400)
+      .json({ error: 'Missing keyword query parameter ?keyword=' });
+  }
+
+  const searchUrl = `https://www.quora.com/search?q=${encodeURIComponent(
+    keyword,
+  )}&type=question`;
+
+  console.log('Navigating to:', searchUrl);
 
   let browser;
+
   try {
     browser = await chromium.launch({
       headless: true,
-      args: ['--no-sandbox', '--disable-setuid-sandbox'],
+      args: ['--no-sandbox', '--disable-dev-shm-usage'],
     });
 
-    // Create context WITH userAgent here (Playwright way)
+    // Create a context with a desktop Chrome user agent
     const context = await browser.newContext({
-      viewport: { width: 1280, height: 720 },
       userAgent:
-        'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 ' +
-        '(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
     });
 
     const page = await context.newPage();
 
-    const url = `https://www.quora.com/search?q=${encodeURIComponent(
-      keyword,
-    )}&type=question`;
+    // Try to navigate, but if it times out, log the error and continue
+    try {
+      await page.goto(searchUrl, {
+        waitUntil: 'domcontentloaded', // do NOT use networkidle on Quora
+        timeout: 20000, // 20s, to avoid Render request timeouts
+      });
+    } catch (navErr) {
+      console.error('Navigation error (continuing anyway):', navErr);
+    }
 
-    console.log('Navigating to:', url);
-
-    await page.goto(url, {
-      // 'domcontentloaded' is safer than 'networkidle' on Quora
-      waitUntil: 'domcontentloaded',
-      timeout: 45000,
-    });
-
-    // Give React a bit of time to render content
+    // Give the page a few seconds to render dynamic content
     await page.waitForTimeout(5000);
 
     const results = await page.evaluate(() => {
       const items = [];
 
-      // Each question card container
-      const blocks = document.querySelectorAll(
-        '.puppeteer_test_question_component_base'
+      // Each question block
+      const containers = document.querySelectorAll(
+        'div.puppeteer_test_question_component_base',
       );
 
-      blocks.forEach((block) => {
-        // Title
-        let title = '';
+      containers.forEach((container) => {
+        // Main question link
+        const link =
+          container.querySelector(
+            'a.puppeteer_test_link[href*="/question/"], a.puppeteer_test_question_link',
+          ) ||
+          container.querySelector(
+            'a.puppeteer_test_link[href^="https://www.quora.com/"]',
+          );
+
+        if (!link) return;
+
         const titleEl =
-          block.querySelector('.puppeteer_test_question_title') ||
-          block.querySelector('a[role="link"] .q-text') ||
-          block.querySelector('.q-text');
-        if (titleEl) {
-          title = titleEl.innerText.trim();
-        }
+          container.querySelector('.puppeteer_test_question_title') || link;
 
-        // URL
-        let url = '';
-        const linkEl =
-          block.querySelector('a.puppeteer_test_link[href^="https://www.quora.com/"]') ||
-          block.querySelector('a[href^="https://www.quora.com/"]');
-        if (linkEl) {
-          url = linkEl.href;
-        }
+        const title = titleEl.innerText.trim();
+        const url = link.href;
 
-        // Snippet (the small gray text under/around the title)
+        // Very rough snippet: first visible small text after the title
         let snippet = '';
-        const snippetEl = block.querySelector(
-          '.q-text.qu-color--gray, .q-text.qu-color--gray_light'
+        const snippetCandidate = container.querySelector(
+          '.q-text.qu-dynamicFontSize--small',
         );
-        if (snippetEl) {
-          snippet = snippetEl.innerText.trim();
+        if (snippetCandidate) {
+          snippet = snippetCandidate.innerText.trim();
         }
 
-        if (title && url) {
+        if (title) {
           items.push({ title, url, snippet });
         }
       });
 
-      return items.slice(0, 20);
+      return items;
     });
 
-    res.json(results);
-  } catch (err) {
-    console.error(err);
-    res
-      .status(500)
-      .json({ error: 'SCRAPE_FAILED', details: String(err) });
+    console.log(
+      `Returning ${results.length} results for keyword "${keyword}"`,
+    );
+
+    res.json({ keyword, results });
+  } catch (error) {
+    console.error('SCRAPE_FAILED:', error);
+    res.status(500).json({ error: 'SCRAPE_FAILED', details: String(error) });
   } finally {
     if (browser) {
-      await browser.close();
+      try {
+        await browser.close();
+      } catch (closeErr) {
+        console.error('Error closing browser:', closeErr);
+      }
     }
   }
 });
 
-// Simple health check route
-app.get('/', (req, res) => {
-  res.send('Quora scraper is running');
+// Extra safety: log unhandled rejections instead of crashing the process
+process.on('unhandledRejection', (err) => {
+  console.error('Unhandled rejection:', err);
 });
 
 app.listen(PORT, () => {
