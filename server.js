@@ -5,6 +5,7 @@ const { chromium } = require('playwright');
 
 const app = express();
 const PORT = process.env.PORT || 10000;
+console.log('PLAYWRIGHT_BROWSERS_PATH at runtime:', process.env.PLAYWRIGHT_BROWSERS_PATH);
 
 app.get('/healthz', (_req, res) => {
   res.send('OK');
