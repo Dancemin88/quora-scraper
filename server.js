@@ -1,8 +1,5 @@
 // server.js
 
-// 1️⃣ Force Playwright to use project-local browsers (node_modules)
-process.env.PLAYWRIGHT_BROWSERS_PATH = '0';
-
 const express = require('express');
 const { chromium } = require('playwright');
 
