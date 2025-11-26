@@ -14,15 +14,15 @@ app.get('/search-quora', async (req, res) => {
       args: ['--no-sandbox', '--disable-setuid-sandbox'],
     });
 
-    const page = await browser.newPage({
+    // Create context WITH userAgent here (Playwright way)
+    const context = await browser.newContext({
       viewport: { width: 1280, height: 720 },
+      userAgent:
+        'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 ' +
+        '(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
     });
 
-    // Look like a normal desktop Chrome
-    await page.setUserAgent(
-      'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 ' +
-        '(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-    );
+    const page = await context.newPage();
 
     const url = `https://www.quora.com/search?q=${encodeURIComponent(
       keyword,
@@ -31,18 +31,18 @@ app.get('/search-quora', async (req, res) => {
     console.log('Navigating to:', url);
 
     await page.goto(url, {
-      // DO NOT use 'networkidle' on Quora
+      // 'domcontentloaded' is safer than 'networkidle' on Quora
       waitUntil: 'domcontentloaded',
       timeout: 45000,
     });
 
-    // Let React render
+    // Give React a bit of time to render content
     await page.waitForTimeout(5000);
 
     const results = await page.evaluate(() => {
       const items = [];
 
-      // Each question card
+      // Each question card container
       const blocks = document.querySelectorAll(
         '.puppeteer_test_question_component_base'
       );
@@ -67,7 +67,7 @@ app.get('/search-quora', async (req, res) => {
           url = linkEl.href;
         }
 
-        // Snippet (gray text around the card)
+        // Snippet (the small gray text under/around the title)
         let snippet = '';
         const snippetEl = block.querySelector(
           '.q-text.qu-color--gray, .q-text.qu-color--gray_light'
@@ -97,7 +97,7 @@ app.get('/search-quora', async (req, res) => {
   }
 });
 
-// Health check route
+// Simple health check route
 app.get('/', (req, res) => {
   res.send('Quora scraper is running');
 });
